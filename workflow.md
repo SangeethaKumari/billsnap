@@ -33,21 +33,21 @@ graph TD
     KafkaJobs["Kafka Topic: sales-agent-jobs"]:::queue
     KafkaEgress["Kafka Topic: discord-egress-delivery"]:::queue
 
-    User -->|1. Interaction / Slash Command| Discord
-    Discord -->|2. Webhook Event (3s SLA)| Gateway
-    Gateway -->|3. Check Lock / Map Snowflake| Redis
-    Gateway -->|4. Push Job| KafkaJobs
-    Gateway -->|5. Deferred Ack / Thinking...| Discord
+    User -->|"1. Interaction / Slash Command"| Discord
+    Discord -->|"2. Webhook Event (3s SLA)"| Gateway
+    Gateway -->|"3. Check Lock / Map Snowflake"| Redis
+    Gateway -->|"4. Push Job"| KafkaJobs
+    Gateway -->|"5. Deferred Ack / Thinking..."| Discord
     
-    KafkaJobs -->|6. Consume Job| Core
-    Core -->|7. Hydrate History / Save Turn| Redis
-    Core -->|8. search_lead / update_deal_stage| MCP
-    MCP -->|9. CRM API Call| CRM
-    Core -->|10. Push Reply| KafkaEgress
+    KafkaJobs -->|"6. Consume Job"| Core
+    Core -->|"7. Hydrate History / Save Turn"| Redis
+    Core -->|"8. search_lead / update_deal_stage"| MCP
+    MCP -->|"9. CRM API Call"| CRM
+    Core -->|"10. Push Reply"| KafkaEgress
     
-    KafkaEgress -->|11. Consume Reply| Egress
-    Egress -->|12. PATCH Webhook Message| Discord
-    Discord -->|13. Update Message| User
+    KafkaEgress -->|"11. Consume Reply"| Egress
+    Egress -->|"12. PATCH Webhook Message"| Discord
+    Discord -->|"13. Update Message"| User
 ```
 
 ### 1. Ingress: Discord Bot Gateway Service (`bot_gateway_service.py`)
