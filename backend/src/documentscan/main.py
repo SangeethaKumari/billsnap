@@ -3,12 +3,12 @@ import uvicorn
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from google.adk import Runner
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
-from documentscan.agent import root_agent
-from .api.routes import query, ingest, evals
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from google.adk import Runner  # noqa: E402
+from google.adk.sessions.in_memory_session_service import InMemorySessionService  # noqa: E402
+from documentscan.agent import root_agent  # noqa: E402
+from .api.routes import query, ingest, evals  # noqa: E402
 
 if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
     os.environ["GEMINI_API_KEY"] = os.environ.get("GOOGLE_API_KEY")

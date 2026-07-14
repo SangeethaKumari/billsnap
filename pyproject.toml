@@ -39,6 +39,9 @@ serve      = "documentscan.main:app"
 mcp-server = "documentscan.server:mcp"
 ingest     = "documentscan.ingestion.parser:main"
 eval       = "documentscan.evals.runner:main"
+bot-gateway   = "documentscan.api.bot_gateway_service:app"
+agent-worker  = "documentscan.workers.agent_core_worker:run_forever"
+egress-worker = "documentscan.workers.egress_worker:run_forever"
 
 [tool.uv]
 package = true
