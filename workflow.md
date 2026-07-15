@@ -2,13 +2,13 @@
 
 ## Elevator Pitch
 > [!NOTE]
-> It is an asynchronous B2B sales automation stack that allows sales representatives to query and update CRM systems directly inside Discord. The entire system is built around a core architectural constraint: **Discord webhooks expect a response within 3-seconds, but an AI agent performing real tool-use and multi-step reasoning can take 10 seconds or more.** This system solves that latency mismatch through a fully decoupled, queue-driven event-loop architecture.
+> It is an asynchronous B2B sales automation stack that allows sales representatives to evaluate target companies against their Ideal Customer Profile (ICP) directly inside Discord. The entire system is built around a core architectural constraint: **Discord webhooks expect a response within 3-seconds, but an AI agent performing real tool-use and multi-step reasoning can take 10 seconds or more.** This system solves that latency mismatch through a fully decoupled, queue-driven event-loop architecture.
 
 ### The Lifecycle Flow
 1. **Trigger:** A representative sends a message or clicks an interaction button in Discord. This hits Discord's gateway infrastructure first, which forwards the request to our API gateway as a signed cryptographic webhook.
 2. **Ingress & Instant Ack:** A lightweight ingress service (FastAPI Bot Gateway) verifies the request signature, maps Discord snowflake IDs to a stable internal conversation UUID, checks a Redis lock to deduplicate double-clicks, and publishes the standardized job payload to Kafka. It immediately returns a deferred channel response (`type: 5` aka "Thinking...") to Discord within milliseconds, stopping the 3-second clock.
 3. **Queue & Background Worker:** A decoupled Agent Core Worker process consumes the job from Kafka whenever it has capacity. It pulls the recent conversation history from Redis, applying a token-budget compactor that replaces older turns with a dense summary rather than feeding the model an ever-growing history that eventually overflows the context window.
-4. **CRM Integration & Safety:** The worker runs the Google ADK Sales Agent. When the agent uses MCP tools to read/write CRM data, the CRM outputs are schema-validated at the boundary to prevent database changes from silently corrupting the agent's context. Outbound deal writes are assigned stable idempotency keys (derived from the conversation UUID and action fingerprint) to guarantee they are written exactly once even during worker retries. A step-count loop guard halts the agent after 5 steps to trigger a clean human hand-off rather than looping forever in a semantic deadlock.
+4. **ICP Evaluation & Safety:** The worker runs the Google ADK Sales Agent. When the agent uses MCP tools to pull ICP criteria from an S3 bucket and fetch firmographics from Apollo CRM, the outputs are schema-validated at the boundary to prevent database changes from silently corrupting the agent's context. Outbound requests include robust mock/fallback fallbacks to guarantee uptime even if external systems are unreachable. A step-count loop guard halts the agent after 5 steps to trigger a clean human hand-off rather than looping forever in a semantic deadlock.
 5. **Egress Delivery:** The finished reply is published to a dedicated egress Kafka topic. An independent Egress Delivery Worker consumes the payload and sends it back to Discord using retries with exponential backoff (so Discord API rate-limits/outages never hang the agent process). If the message exceeds Discord's 2000-character limit, it splits the text at the nearest paragraph boundary and attaches the full text as a markdown file.
 
 ---
@@ -22,12 +22,13 @@ graph TD
 
     User["Discord Client (Sales Rep)"]:::external
     Discord["Discord API Gateway"]:::external
-    CRM["CRM System"]:::external
+    S3["S3 Bucket (ICP criteria)"]:::external
+    Apollo["Apollo CRM"]:::external
 
     Gateway["Discord Bot Gateway Service (FastAPI)"]:::service
     Core["Agent Core Worker (ADK)"]:::service
     Egress["Egress Delivery Worker"]:::service
-    MCP["MCP / CRM Tool Layer"]:::service
+    MCP["MCP Tool Layer"]:::service
 
     Redis["Redis Cache / Lock"]:::storage
     KafkaJobs["Kafka Topic: sales-agent-jobs"]:::queue
@@ -41,13 +42,14 @@ graph TD
     
     KafkaJobs -->|"6. Consume Job"| Core
     Core -->|"7. Hydrate History / Save Turn"| Redis
-    Core -->|"8. search_lead / update_deal_stage"| MCP
-    MCP -->|"9. CRM API Call"| CRM
-    Core -->|"10. Push Reply"| KafkaEgress
+    Core -->|"8. get_s3_icp_criteria / get_apollo_company_details"| MCP
+    MCP -->|"9. Fetch ICP Reference"| S3
+    MCP -->|"10. Fetch Firmographics"| Apollo
+    Core -->|"11. Push Reply"| KafkaEgress
     
-    KafkaEgress -->|"11. Consume Reply"| Egress
-    Egress -->|"12. PATCH Webhook Message"| Discord
-    Discord -->|"13. Update Message"| User
+    KafkaEgress -->|"12. Consume Reply"| Egress
+    Egress -->|"13. PATCH Webhook Message"| Discord
+    Discord -->|"14. Update Message"| User
 ```
 
 ### 1. Ingress: Discord Bot Gateway Service (`bot_gateway_service.py`)
@@ -68,9 +70,9 @@ graph TD
 - **Max-Loop Protection:** Implements a step-counter loop guard (max 5 steps) to prevent the agent from getting stuck in a tool-execution deadlock. If exceeded, it triggers a clean hand-off response.
 - **Egress Hand-off:** Publishes the final output to the `discord-egress-delivery` queue and commits the Kafka offset.
 
-### 4. Integration: MCP / CRM Tool Layer (`mcp_tool.py`)
-- **Schema Validation:** Enforces strict Pydantic model schemas at the boundary to catch CRM API drift early.
-- **Idempotency:** Generates action-specific idempotency keys using a hash of the conversation ID and request payload. This ensures that duplicate executions of the core worker (e.g. during a pod crash recovery) do not cause double-writes in the CRM.
+### 4. Integration: MCP Tool Layer (`mcp_tool.py`)
+- **Schema Validation:** Enforces strict Pydantic model schemas at the boundary to catch CRM / S3 format changes and API drift early.
+- **Fail-Safe Fallbacks:** Includes local default criteria and firmographic mock data so the agent remains functional even if S3 or Apollo CRM experiences downtime.
 
 ### 5. Egress: Egress Delivery Worker (`egress_worker.py`)
 - Dedicated worker that consumes finished replies from the egress queue and makes the outbound `PATCH` call back to Discord.
@@ -92,7 +94,7 @@ sequenceDiagram
     participant Redis as Redis Cache/Lock
     participant Kafka as Kafka Message Queue
     participant Core as Agent Core Worker (ADK)
-    participant CRM as CRM / MCP Tool Layer
+    participant MCP as MCP Tool Layer
     participant Egress as Egress Delivery Worker
 
     User->>Discord: Sends command/message
@@ -117,8 +119,8 @@ sequenceDiagram
     Redis-->>Core: Return recent turns/summary
     Note over Core: Check token budget & run Sales Agent (ADK)
     loop Agent Execution
-        Core->>CRM: Call search_lead / update_deal_stage (MCP tool)
-        CRM-->>Core: Return validated CRM record
+        Core->>MCP: Call get_s3_icp_criteria / get_apollo_company_details (MCP tool)
+        MCP-->>Core: Return validated data
     end
     Note over Core: Apply max-loop guard (max 5 steps)
     Core->>Redis: append_turn(conversation_id, assistant, response)

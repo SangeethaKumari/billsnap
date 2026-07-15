@@ -23,7 +23,7 @@ from google.adk.agents import Agent
 from google.adk.sessions.in_memory_session_service import InMemorySessionService  # swap for a persistent
                                                           # session backend in prod
 
-from documentscan.tools.mcp_tool import search_lead, update_deal_stage
+from documentscan.tools.mcp_tool import get_s3_icp_criteria, get_apollo_company_details
 
 redis_client = redis.Redis(
     host=os.environ["REDIS_HOST"],
@@ -50,14 +50,16 @@ MAX_AGENT_STEPS = 5
 TOKEN_BUDGET_TRIGGER = 6000  # ~75% of a typical 8k-context sales prompt budget
 
 sales_agent = Agent(
-    name="sales_discovery_agent",
+    name="sales_icp_evaluator_agent",
     model="gemini-2.5-flash",
     instruction=(
-        "You are a B2B sales assistant. Use search_lead to look up CRM "
-        "context before answering pipeline questions, and update_deal_stage "
-        "only when the user explicitly confirms a stage change."
+        "You are an AI sales assistant helping reps evaluate if a target company "
+        "matches the Ideal Customer Profile (ICP). Use get_s3_icp_criteria to pull "
+        "the reference ICP definition from the S3 bucket, and get_apollo_company_details "
+        "to retrieve the target company's firmographics. Compare the company details "
+        "against the criteria and provide a clear, reasoned ICP fit assessment."
     ),
-    tools=[search_lead, update_deal_stage],
+    tools=[get_s3_icp_criteria, get_apollo_company_details],
 )
 
 session_service = InMemorySessionService()
