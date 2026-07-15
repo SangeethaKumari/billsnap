@@ -95,6 +95,8 @@ sequenceDiagram
     participant Kafka as Kafka Message Queue
     participant Core as Agent Core Worker (ADK)
     participant MCP as MCP Tool Layer
+    participant S3 as S3 Bucket (ICP Reference)
+    participant Apollo as Apollo CRM
     participant Egress as Egress Delivery Worker
 
     User->>Discord: Sends command/message
@@ -119,8 +121,15 @@ sequenceDiagram
     Redis-->>Core: Return recent turns/summary
     Note over Core: Check token budget & run Sales Agent (ADK)
     loop Agent Execution
-        Core->>MCP: Call get_s3_icp_criteria / get_apollo_company_details (MCP tool)
-        MCP-->>Core: Return validated data
+        Core->>MCP: Call get_s3_icp_criteria()
+        MCP->>S3: GET /s3/icp_criteria
+        S3-->>MCP: Return ICP reference json
+        MCP-->>Core: Return validated criteria
+
+        Core->>MCP: Call get_apollo_company_details(company_name)
+        MCP->>Apollo: GET /apollo/company?name=company_name
+        Apollo-->>MCP: Return company details json
+        MCP-->>Core: Return validated firmographics
     end
     Note over Core: Apply max-loop guard (max 5 steps)
     Core->>Redis: append_turn(conversation_id, assistant, response)
